@@ -637,6 +637,131 @@ fn run_sheet(gl: &glow::Context, o: &Opts) -> Value {
     envelope(results, skips)
 }
 
+/// 후보 프레임을 한꺼번에 뽑는다 (컨택트 시트/시점 고르기용).
+/// 애니메이션마다 `--samples` 개 시점(0, d/N, 2d/N, ...)을 크롭해서 `<out>/<스켈레톤>/<애니메이션>__<번호>.png` 로 저장한다.
+fn run_frames(gl: &glow::Context, o: &Opts) -> Value {
+    let c = match Common::from(o, true) {
+        Ok(c) => c,
+        Err(e) => return error_value(&e),
+    };
+    let scale = match o.num("scale", 1.0) {
+        Ok(v) => v.clamp(0.01, 1.0),
+        Err(e) => return error_value(&e),
+    };
+    let samples = match o.num("samples", 5.0) {
+        Ok(v) => (v as u32).clamp(1, 24),
+        Err(e) => return error_value(&e),
+    };
+    let wanted: Option<Vec<String>> = o
+        .flags
+        .get("animations")
+        .map(|s| s.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect());
+    let crop = !o.switches.contains("no-crop");
+    let trim = !o.switches.contains("keep-shadow");
+    let mut renderer = match unsafe { GlRenderer::new(gl) } {
+        Ok(r) => r,
+        Err(e) => return error_value(&format!("렌더러 초기화 실패: {}", e)),
+    };
+
+    let mut results = Vec::new();
+    let mut skips = Vec::new();
+    for data in &c.inputs {
+        let (sk, atlas) = match load_skeleton(data, c.atlas.as_deref()) {
+            Ok(v) => v,
+            Err(e) => {
+                skips.push(skipped(data, &e));
+                continue;
+            }
+        };
+        let prep = skin_variants(&sk, c.skin.as_deref()).and_then(|s| load_page_textures(gl, &mut renderer, &sk).map(|_| s));
+        let skins = match prep {
+            Ok(s) => s,
+            Err(e) => {
+                skips.push(skipped(data, &e));
+                continue;
+            }
+        };
+        let all_anims = sk.get_animations();
+        let anims: Vec<String> = match &wanted {
+            Some(w) => all_anims.iter().filter(|a| w.contains(a)).cloned().collect(),
+            None => all_anims,
+        };
+        if anims.is_empty() {
+            skips.push(skipped(data, "요청한 애니메이션이 없습니다."));
+            continue;
+        }
+        let stem = Recorder::sanitize(&stem_of(data));
+
+        for skin in &skins {
+            let dir_name = match skin {
+                Some(s) => format!("{}__{}", stem, Recorder::sanitize(s)),
+                None => stem.clone(),
+            };
+            let dir = c.out_dir_for(data).join(&dir_name);
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                skips.push(skipped(data, &format!("폴더 생성 실패: {}", e)));
+                continue;
+            }
+            let mut anim_values = Vec::new();
+            for anim in &anims {
+                if let Err(e) = set_view(gl, &mut renderer, &sk, anim, skin.as_deref()) {
+                    skips.push(skipped(data, &with_skin_prefix(skin, format!("[{}] {}", anim, e))));
+                    continue;
+                }
+                let dur = sk.get_duration();
+                let (fw, fh) = (renderer.fbo_width as u32, renderer.fbo_height as u32);
+                let mut frames = Vec::new();
+                for i in 0..samples {
+                    let t = if samples == 1 { 0.0 } else { dur * i as f32 / samples as f32 };
+                    let px = render_pose(gl, &renderer, &sk, t, c.pma);
+                    let cropped = if crop {
+                        Recorder::analyze_content(fw, fh, &px, trim).map(|info| {
+                            let r = info.rect;
+                            (r.2 - r.0 + 1, r.3 - r.1 + 1, Recorder::crop_rect(fw, &px, r))
+                        })
+                    } else {
+                        Some((fw, fh, px))
+                    };
+                    let time_v = (t as f64 * 1000.0).round() / 1000.0;
+                    match cropped {
+                        None => frames.push(json!({ "index": i, "time": time_v, "file": Value::Null, "empty": true })),
+                        Some((mut w, mut h, mut buf)) => {
+                            if scale < 1.0 {
+                                if let Some(img) = image::RgbaImage::from_raw(w, h, buf.clone()) {
+                                    let (nw, nh) = (
+                                        ((w as f32 * scale).round() as u32).max(1),
+                                        ((h as f32 * scale).round() as u32).max(1),
+                                    );
+                                    buf = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Lanczos3).into_raw();
+                                    w = nw;
+                                    h = nh;
+                                }
+                            }
+                            let file = dir.join(format!("{}__{}.png", Recorder::sanitize(anim), i));
+                            match image::save_buffer(&file, &buf, w, h, image::ExtendedColorType::Rgba8) {
+                                Ok(()) => frames.push(json!({
+                                    "index": i, "time": time_v, "file": path_str(&file), "width": w, "height": h
+                                })),
+                                Err(e) => frames.push(json!({ "index": i, "time": time_v, "file": Value::Null, "error": e.to_string() })),
+                            }
+                        }
+                    }
+                }
+                anim_values.push(json!({ "name": anim, "duration": (dur as f64 * 1000.0).round() / 1000.0, "frames": frames }));
+            }
+            results.push(json!({
+                "input": path_str(data),
+                "atlas": path_str(&atlas),
+                "skin": skin,
+                "dir": path_str(&dir),
+                "animations": anim_values,
+            }));
+        }
+    }
+    unsafe { renderer.destroy(gl) };
+    envelope(results, skips)
+}
+
 type JobFn = Box<dyn FnOnce(&glow::Context) -> Value>;
 
 /// 숨김 창을 띄워 GL 컨텍스트를 얻고, 첫 프레임에서 작업을 실행한 뒤 창을 닫는다.
@@ -725,9 +850,9 @@ pub fn run(args: Vec<String>) -> i32 {
             return 1;
         }
     };
-    if !matches!(cmd.as_str(), "info" | "frame" | "sheet") {
+    if !matches!(cmd.as_str(), "info" | "frame" | "sheet" | "frames") {
         eprintln!("{}", USAGE);
-        println!("{}", error_value("알 수 없는 명령입니다. frame / sheet / info 중 하나를 쓰세요."));
+        println!("{}", error_value("알 수 없는 명령입니다. frame / frames / sheet / info 중 하나를 쓰세요."));
         return 2;
     }
 
@@ -746,6 +871,7 @@ pub fn run(args: Vec<String>) -> i32 {
         match cmd.as_str() {
             "info" => run_info_inputs(&common),
             "frame" => run_with_gl(Box::new(move |gl| run_frame(gl, &opts))),
+            "frames" => run_with_gl(Box::new(move |gl| run_frames(gl, &opts))),
             _ => run_with_gl(Box::new(move |gl| run_sheet(gl, &opts))),
         }
     };
