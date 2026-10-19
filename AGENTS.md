@@ -88,6 +88,7 @@ cargo build --release -p sv-38
 - **명령:** `sv-cli info|frame|sheet <스켈레톤|폴더> ...` (옵션은 `headless.rs` 상단 주석). 결과는 stdout에 JSON 한 덩어리(`ok/count/results/skipped`).
 - **MCP 도구:** `spine_info`, `spine_render_frame`, `spine_render_sheet`. 등록은 이 폴더의 `.mcp.json`(Claude Code 재시작 필요). 다른 프로젝트에서도 쓰려면 `claude mcp add spine-viewer -- python "H:\source\repos\spine hwa\mcp\spine_mcp.py"`.
 - **뮤즈대쉬 기준값:** 스켈레톤 원본 크기가 Spine Pro 결과(임포트 스케일 0.5)의 2배다 → 기존 `몬스터_렌더`와 맞추려면 `--scale 0.5`. 기존 결과와 비교하면 standby 0초 프레임은 대부분 ±3px로 일치하고(장면01~12 전체 비교), 어긋나는 건 사용자가 손으로 고른 프레임(`pick: largest` 등)과 standby 없는 스켈레톤이다.
+  - **장면01 MCP 검증(2026-10-19, `spine_render_frame` skin=all, scale=0.5, 52개 전부 렌더·skipped 0):** 기존 `몬스터_렌더/장면01` 24장 중 16장이 ±4px 일치(그림도 육안 동일, 그림자 유지/제거 판단 포함). 0106 air/road는 `time=largest`로 일치(+2). 남은 6장은 0107(standby 없음, `in_boss_2_17`의 손으로 고른 자세), 0108(기존은 다른 프레임), 0115(standby 없는 롱노트 실패)라서 자동 선택으론 안 맞는다 → 미리보기 보고 `time`을 지정한다.
 
 ### 설계 Rationale / 함정
 1. **숨김 창으로 GL 컨텍스트 확보:** eframe `with_visible(false)` 창의 첫 `ui()` 프레임에서 작업을 실행하고 `Close`한다 (별도 EGL/오프스크린 컨텍스트 불필요, 실측 동작). 렌더러는 GUI와 같은 `GlRenderer`/FBO 경로를 그대로 쓴다.
