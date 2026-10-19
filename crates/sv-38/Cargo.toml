@@ -10,3 +10,7 @@ path = "src/main.rs"
 [dependencies]
 spine-sys-38 = { path = "../spine-sys-38" }
 spine-viewer-core = { path = "../spine-viewer-core" }
+
+[[bin]]
+name = "sv-cli"
+path = "src/cli_main.rs"

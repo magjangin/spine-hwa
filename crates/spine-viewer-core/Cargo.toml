@@ -9,3 +9,4 @@ eframe = { version = "0.37", default-features = false, features = ["default_font
 egui = "0.37"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rfd = "0.17.2"
+serde_json = "1"

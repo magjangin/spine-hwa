@@ -76,3 +76,29 @@ cargo build --release -p sv-38
 ### 산출물 위치
 - `bin/SpineViewer.exe` (Spine 3.8.99 Viewer 단독 실행 파일)
 - `bin/sv-3.8.exe`
+- `bin/sv-cli.exe` (헤드리스 CLI, 콘솔 서브시스템 — MCP/자동화용, 아래 5장)
+
+---
+
+## 5. 헤드리스 CLI(`sv-cli`) & MCP 서버 (AI 자동화)
+
+뮤즈대쉬 에셋(`H:\유튜브 곡 모음\음악원본 저작권 O\뮤즈대쉬\gamescene_추출\장면NN\원본`)의 몬스터/보스를 Spine Pro 없이 일괄 렌더하려고 만든 경로. asset-tool(`H:\source\repos\asset tool`)이 추출한 `.skel/.atlas/.png`를 그대로 읽는다 (파츠 분리·Spine Pro 임포트 스케일 불필요).
+
+- **구성:** `crates/spine-viewer-core/src/headless.rs`(CLI 본체) · `export.rs`(GUI와 공용 렌더/시트 로직) · `crates/sv-38/src/cli_main.rs`(`sv-cli` 진입점) · `mcp/spine_mcp.py`(표준 라이브러리만 쓰는 stdio MCP 서버, `sv-cli.exe`를 호출) · `.mcp.json`(Claude Code 등록).
+- **명령:** `sv-cli info|frame|sheet <스켈레톤|폴더> ...` (옵션은 `headless.rs` 상단 주석). 결과는 stdout에 JSON 한 덩어리(`ok/count/results/skipped`).
+- **MCP 도구:** `spine_info`, `spine_render_frame`, `spine_render_sheet`. 등록은 이 폴더의 `.mcp.json`(Claude Code 재시작 필요). 다른 프로젝트에서도 쓰려면 `claude mcp add spine-viewer -- python "H:\source\repos\spine hwa\mcp\spine_mcp.py"`.
+- **뮤즈대쉬 기준값:** 스켈레톤 원본 크기가 Spine Pro 결과(임포트 스케일 0.5)의 2배다 → 기존 `몬스터_렌더`와 맞추려면 `--scale 0.5`. 기존 결과와 비교하면 standby 0초 프레임은 대부분 ±3px로 일치하고(장면01~12 전체 비교), 어긋나는 건 사용자가 손으로 고른 프레임(`pick: largest` 등)과 standby 없는 스켈레톤이다.
+
+### 설계 Rationale / 함정
+1. **숨김 창으로 GL 컨텍스트 확보:** eframe `with_visible(false)` 창의 첫 `ui()` 프레임에서 작업을 실행하고 `Close`한다 (별도 EGL/오프스크린 컨텍스트 불필요, 실측 동작). 렌더러는 GUI와 같은 `GlRenderer`/FBO 경로를 그대로 쓴다.
+2. **폴더 입력은 스켈레톤마다 자기 자신을 자식 프로세스로 실행:** Spine C++ 런타임은 엉뚱한 아틀라스로 로드하면 예외가 아니라 `assert(inIndex < _size)`로 프로세스를 죽인다(예: 0304.skel + 0301.atlas). 격리해서 해당 파일만 `skipped`로 남기고 계속 진행한다. (파일당 약 0.3초)
+3. **아틀라스 자동 짝맞춤(스켈레톤 ↔ 아틀라스는 1:1이 아님):** 같은 폴더 `.atlas`의 리전 이름이 스켈레톤 바이너리 안 문자열과 얼마나 겹치는지로 점수 → 높은 순, 동점이면 ①같은 이름 ②다른 스켈레톤 전용 이름이 아닌 것(예: `0107_air_double.atlas`는 `0107_air_double.skel` 전용이라 뒤로) ③접두사 순. 겹침 0인 후보는 시도조차 안 한다(어서션 방지). 틀리면 `--atlas`로 직접 지정.
+4. **알파 미리 곱하기 복원:** PMA로 그린 FBO를 그대로 PNG로 저장하면 반투명 효과가 어둡게 나온다(0105 빛줄기로 확인). `render_pose`와 GUI "현재 프레임 저장"은 PMA일 때 `Recorder::unpremultiply`를 적용한다. (GUI 녹화 기능은 기존 그대로 미적용)
+5. **그림자 크롭 규칙(실측으로 맞춤):** 본체(납작하지 않은 가장 큰 덩어리)에서 세로로 `max(20px, 본체 높이의 15%)` 이상 떨어진 납작한(높이 ≤ 폭의 절반) 덩어리는 크롭에서 뺀다 (`--keep-shadow`로 끔). 가까운 그림자(0111: 간격 22px)는 기존 결과처럼 남기고 먼 것(0110: 38px, 0105_road: 70px)은 뺀다.
+6. **`--time`:** 숫자(초) 또는 `largest`(본체 면적이 가장 큰 프레임, 1/30초 간격 최대 150샘플). 시간을 지정하지 않았는데 그 시점이 비어 있으면(in_/out_ 연출 첫 프레임 등) 자동으로 largest로 대신한다. 기본 애니메이션은 `standby`, 없으면 첫 번째.
+7. **스킨:** `--skin all`은 default 외 모든 스킨을 `<이름>__<스킨>`으로 각각 저장한다 (몸통이 스킨에만 있는 0301/0307/0314/0914 등). 스킨 없이 뽑으면 비어 보인다. 런타임의 `setSkin`은 default 스킨을 폴백으로 쓰므로 Spine Pro처럼 JSON 복사본을 만들 필요가 없다.
+
+### Dead Ends / 아직 못한 것
+- `_air`/`_road` 쌍을 같은 애니메이션·같은 시점으로 묶어 고르는 기능은 없다 (결과의 `time`을 보고 두 번째 호출에 `--time`으로 지정).
+- 사용자가 손으로 고른 프레임(예: 0316)과 자동 `largest`는 일치하지 않을 수 있다 → 미리보기를 보고 시간을 지정해 다시 뽑는 식으로 쓴다.
+- 보스 `animations.json`/컨택트 시트 같은 asset-tool 쪽 출력 형식은 만들지 않았다 (시트는 `spine_render_sheet`의 json 형식).

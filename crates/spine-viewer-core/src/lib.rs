@@ -3,6 +3,8 @@ pub mod spine_wrapper;
 pub mod renderer;
 pub mod state;
 pub mod recorder;
+pub mod export;
+pub mod headless;
 pub mod ui;
 pub mod app;
 
