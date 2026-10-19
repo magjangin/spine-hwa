@@ -22,6 +22,12 @@ pub struct AppState {
     // Single-frame export
     pub export_crop: bool,
     pub export_status: Option<String>,
+    pub sheet_fps: f32,
+    pub sheet_cols: u32,
+    pub sheet_json: bool,
+    pub sheet_crop: bool,
+    pub sheet_scale: f32,
+    pub sheet_status: Option<String>,
 
     // View & Display
     pub draw_border: bool,
@@ -58,6 +64,12 @@ impl Default for AppState {
 
             export_crop: true,
             export_status: None,
+            sheet_fps: 30.0,
+            sheet_cols: 8,
+            sheet_json: true,
+            sheet_crop: true,
+            sheet_scale: 1.0,
+            sheet_status: None,
 
             draw_border: false,
             texture_size: (0.0, 0.0),

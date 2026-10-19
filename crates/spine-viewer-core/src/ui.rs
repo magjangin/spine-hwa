@@ -10,6 +10,7 @@ pub struct UiAction {
     pub open_requested: bool,
     pub reset_view: bool,
     pub save_frame: bool,
+    pub save_sheet: bool,
 }
 
 impl Default for UiAction {
@@ -23,6 +24,7 @@ impl Default for UiAction {
             open_requested: false,
             reset_view: false,
             save_frame: false,
+            save_sheet: false,
         }
     }
 }
@@ -208,6 +210,34 @@ pub fn render_sidebar_ui(ui: &mut Ui, state: &mut AppState, duration: f32) -> Ui
                 action.save_frame = true;
             }
             if let Some(msg) = &state.export_status {
+                ui.label(msg);
+            }
+
+            ui.add_space(8.0);
+            ui.separator();
+
+            // 3-2. 애니메이션 시트 (현재 애니메이션 전 구간을 격자 PNG 한 장으로)
+            ui.heading("애니메이션 시트");
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("FPS");
+                ui.add(DragValue::new(&mut state.sheet_fps).speed(1.0).range(1.0..=60.0).max_decimals(2));
+                ui.label("열 수");
+                ui.add(DragValue::new(&mut state.sheet_cols).speed(0.2).range(1..=64));
+            });
+            ui.horizontal(|ui| {
+                ui.label("배율");
+                ui.add(DragValue::new(&mut state.sheet_scale).speed(0.02).range(0.05..=1.0).max_decimals(2));
+                ui.label("(한계 초과 시 자동 축소)");
+            });
+            ui.checkbox(&mut state.sheet_crop, "셀을 내용에 맞춰 줄이기 (전 프레임 합집합)");
+            ui.checkbox(&mut state.sheet_json,"메타데이터(.json) 함께 저장");
+            let sheet_btn = Button::new("시트 PNG로 저장")
+                .min_size(egui::vec2(ui.available_width(), 30.0));
+            if ui.add(sheet_btn).clicked() {
+                action.save_sheet = true;
+            }
+            if let Some(msg) = &state.sheet_status {
                 ui.label(msg);
             }
 

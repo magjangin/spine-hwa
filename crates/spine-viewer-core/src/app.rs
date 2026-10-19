@@ -4,7 +4,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2, Ui, StrokeKind};
 use eframe::glow;
 
 use crate::cli::{resolve_paths, CliArgs};
-use crate::recorder::Recorder;
+use crate::recorder::{Recorder, SheetBuilder};
 use crate::renderer::GlRenderer;
 use crate::spine_wrapper::SpineSkeleton;
 use crate::state::AppState;
@@ -166,6 +166,102 @@ impl SpineViewerApp {
         self.sk().set_time(0.0);
 
         Ok(())
+    }
+
+    /// 현재 애니메이션 전 구간을 `sheet_fps` 간격으로 렌더해 격자 시트 PNG(+json)로 저장한다.
+    fn export_sheet(&mut self) -> Result<String, String> {
+        let dir = Recorder::validate_path(&self.state.recording_path)?;
+        let gl = self.gl_context.clone().ok_or("GL 컨텍스트가 없습니다.")?;
+        let renderer = self.renderer.as_ref().ok_or("렌더러가 초기화되지 않았습니다.")?;
+        let (fbo_w, fbo_h) = (renderer.fbo_width as u32, renderer.fbo_height as u32);
+        if fbo_w == 0 || fbo_h == 0 {
+            return Err("렌더 영역이 비어 있습니다.".to_string());
+        }
+
+        let fps = self.state.sheet_fps.clamp(1.0, 60.0);
+        let duration = self.sk().get_duration().max(0.001);
+        let count = ((duration * fps).ceil() as u32).max(1);
+        let pma = self.state.use_premultiply_alpha;
+        let prev_time = self.state.time;
+
+        let render_frame = |i: u32| -> Vec<u8> {
+            self.sk().set_time(i as f32 / fps);
+            self.sk().update(0.0);
+            let mesh = self.sk().generate_mesh(pma);
+            unsafe {
+                renderer.render_to_fbo(&gl, mesh.vertices, mesh.indices, mesh.batches, pma);
+                renderer.read_fbo_pixels(&gl)
+            }
+        };
+
+        // 1패스: 전 프레임의 실제 내용 합집합 영역을 구해 셀 크기로 쓴다 (최대 바운드보다 훨씬 작을 수 있음).
+        let rect = if self.state.sheet_crop {
+            let mut union: Option<(u32, u32, u32, u32)> = None;
+            for i in 0..count {
+                if let Some(b) = Recorder::content_bounds(fbo_w, fbo_h, &render_frame(i)) {
+                    union = Some(match union {
+                        None => b,
+                        Some(u) => (u.0.min(b.0), u.1.min(b.1), u.2.max(b.2), u.3.max(b.3)),
+                    });
+                }
+            }
+            union.ok_or("애니메이션 전 구간에 보이는 픽셀이 없습니다.")?
+        } else {
+            (0, 0, fbo_w - 1, fbo_h - 1)
+        };
+        let (src_w, src_h) = (rect.2 - rect.0 + 1, rect.3 - rect.1 + 1);
+
+        let cols = self.state.sheet_cols.clamp(1, count);
+        let rows = (count + cols - 1) / cols;
+
+        // 사용자 배율, 그리고 한계(한 변/총 픽셀)를 넘으면 자동으로 더 줄인다.
+        let full_w = (src_w * cols) as f32;
+        let full_h = (src_h * rows) as f32;
+        let fit_side = (SheetBuilder::MAX_SIDE as f32 / full_w).min(SheetBuilder::MAX_SIDE as f32 / full_h);
+        let fit_area = (SheetBuilder::MAX_PIXELS as f32 / (full_w * full_h)).sqrt();
+        let scale = self.state.sheet_scale.clamp(0.01, 1.0).min(fit_side).min(fit_area);
+        let cell_w = ((src_w as f32 * scale).round() as u32).max(1);
+        let cell_h = ((src_h as f32 * scale).round() as u32).max(1);
+        let mut sheet = SheetBuilder::new(cell_w, cell_h, cols, rows)?;
+
+        // 2패스: 각 프레임을 합집합 영역으로 잘라(필요하면 축소해) 시트에 배치
+        for i in 0..count {
+            let pixels = render_frame(i);
+            let cropped = Recorder::crop_rect(fbo_w, &pixels, rect);
+            if cell_w == src_w && cell_h == src_h {
+                sheet.blit(i, &cropped);
+            } else {
+                let img = image::RgbaImage::from_raw(src_w, src_h, cropped).ok_or("프레임 버퍼 크기 오류")?;
+                let small = image::imageops::resize(&img, cell_w, cell_h, image::imageops::FilterType::Lanczos3);
+                sheet.blit(i, small.as_raw());
+            }
+        }
+        // 원래 시점으로 복원
+        self.sk().set_time(prev_time);
+        self.sk().update(0.0);
+
+        let stem = format!("{}_sheet", Recorder::sanitize(&self.state.current_animation));
+        let png_path = dir.join(format!("{}.png", stem));
+        sheet.save(&png_path)?;
+
+        if self.state.sheet_json {
+            let json = format!(
+                "{{\n  \"image\": \"{}.png\",\n  \"frameWidth\": {},\n  \"frameHeight\": {},\n  \"offsetX\": {},\n  \"offsetY\": {},\n  \"scale\": {},\n  \"columns\": {},\n  \"rows\": {},\n  \"frameCount\": {},\n  \"fps\": {},\n  \"duration\": {}\n}}\n",
+                stem, cell_w, cell_h, rect.0, rect.1, scale, cols, rows, count, fps, duration
+            );
+            std::fs::write(dir.join(format!("{}.json", stem)), json)
+                .map_err(|e| format!("json 저장 실패: {}", e))?;
+        }
+        Ok(format!(
+            "저장됨: {} ({}프레임, 셀 {}x{}, 시트 {}x{}, 배율 {:.0}%)",
+            png_path.display(),
+            count,
+            cell_w,
+            cell_h,
+            sheet.width(),
+            sheet.height(),
+            scale * 100.0
+        ))
     }
 
     fn init_gl(&mut self, gl: &glow::Context) -> Result<(), String> {
@@ -504,6 +600,15 @@ impl eframe::App for SpineViewerApp {
                 Ok(path) => format!("저장됨: {}", path.display()),
                 Err(e) => format!("저장 실패: {}", e),
             });
+        }
+
+        if ui_action.save_sheet && !self.state.is_recording {
+            self.state.sheet_status = Some(match self.export_sheet() {
+                Ok(msg) => msg,
+                Err(e) => format!("저장 실패: {}", e),
+            });
+            // 시트 렌더가 FBO에 마지막 프레임을 남기므로 다음 프레임에 원래 포즈로 다시 그린다.
+            ctx.request_repaint();
         }
 
         // 6. 메인 뷰포트 영역 (사이드바 우측 전체 캔버스 -> 캐릭터가 훤히 보임!)
