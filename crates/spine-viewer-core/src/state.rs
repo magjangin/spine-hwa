@@ -19,6 +19,10 @@ pub struct AppState {
     pub current_recording_frame: u32,
     pub saved_timescale: f32,
 
+    // Single-frame export
+    pub export_crop: bool,
+    pub export_status: Option<String>,
+
     // View & Display
     pub draw_border: bool,
     pub texture_size: (f32, f32),
@@ -51,6 +55,9 @@ impl Default for AppState {
             render_scale: 1.0,
             current_recording_frame: 0,
             saved_timescale: 1.0,
+
+            export_crop: true,
+            export_status: None,
 
             draw_border: false,
             texture_size: (0.0, 0.0),

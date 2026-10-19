@@ -9,6 +9,7 @@ pub struct UiAction {
     pub time_changed: Option<f32>,
     pub open_requested: bool,
     pub reset_view: bool,
+    pub save_frame: bool,
 }
 
 impl Default for UiAction {
@@ -21,6 +22,7 @@ impl Default for UiAction {
             time_changed: None,
             open_requested: false,
             reset_view: false,
+            save_frame: false,
         }
     }
 }
@@ -192,6 +194,22 @@ pub fn render_sidebar_ui(ui: &mut Ui, state: &mut AppState, duration: f32) -> Ui
                     action.reset_view = true;
                 }
             });
+
+            ui.add_space(8.0);
+            ui.separator();
+
+            // 3-1. 현재 프레임 저장 섹션 (저장 폴더는 아래 녹화 섹션과 공유)
+            ui.heading("현재 프레임 저장");
+            ui.add_space(4.0);
+            ui.checkbox(&mut state.export_crop, "내용에 맞춰 자르기 (해제 시 최대 바운드 크기)");
+            let save_btn = Button::new(format!("{:.2}s 시점 PNG로 저장", state.time))
+                .min_size(egui::vec2(ui.available_width(), 30.0));
+            if ui.add(save_btn).clicked() {
+                action.save_frame = true;
+            }
+            if let Some(msg) = &state.export_status {
+                ui.label(msg);
+            }
 
             ui.add_space(8.0);
             ui.separator();

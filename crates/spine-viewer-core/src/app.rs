@@ -484,6 +484,28 @@ impl eframe::App for SpineViewerApp {
             }
         }
 
+        // 현재 프레임 1장 저장 (방금 렌더한 FBO를 그대로 읽는다)
+        if ui_action.save_frame && !self.state.is_recording {
+            let result = Recorder::validate_path(&self.state.recording_path).and_then(|dir| {
+                let renderer = self.renderer.as_ref().ok_or("렌더러가 초기화되지 않았습니다.")?;
+                let gl = self.gl_context.as_ref().ok_or("GL 컨텍스트가 없습니다.")?;
+                let pixels = unsafe { renderer.read_fbo_pixels(gl) };
+                Recorder::save_snapshot(
+                    &dir,
+                    &self.state.current_animation,
+                    self.state.time,
+                    self.state.export_crop,
+                    renderer.fbo_width as u32,
+                    renderer.fbo_height as u32,
+                    &pixels,
+                )
+            });
+            self.state.export_status = Some(match result {
+                Ok(path) => format!("저장됨: {}", path.display()),
+                Err(e) => format!("저장 실패: {}", e),
+            });
+        }
+
         // 6. 메인 뷰포트 영역 (사이드바 우측 전체 캔버스 -> 캐릭터가 훤히 보임!)
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter();
