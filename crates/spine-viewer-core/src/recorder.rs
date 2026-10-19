@@ -2,6 +2,12 @@ use std::path::{Path, PathBuf};
 
 pub struct Recorder;
 
+/// 이 값 이하의 알파는 "비어 있음"으로 본다. Spine Pro PNG 내보내기의 크롭과 맞춘 실측값
+/// (0708_air: 알파>2 기준 높이 323px ≈ 기존 결과 162×2).
+const EDGE_ALPHA: u8 = 1;
+/// 본체 덩어리 위아래로 옅은 번짐을 포함할 최대 줄 수.
+const HALO_ROWS: u32 = 16;
+
 /// `Recorder::analyze_content` 결과.
 pub struct ContentInfo {
     /// (min_x, min_y, max_x, max_y), 끝 포함
@@ -107,7 +113,7 @@ impl Recorder {
         let mut found = false;
         for y in 0..h {
             for x in 0..w {
-                if rgba[(y * w + x) * 4 + 3] != 0 {
+                if rgba[(y * w + x) * 4 + 3] > EDGE_ALPHA {
                     found = true;
                     min_x = min_x.min(x);
                     max_x = max_x.max(x);
@@ -196,18 +202,31 @@ impl Recorder {
 
         let (mut min_x, mut min_y, mut max_x, mut max_y) = (u32::MAX, u32::MAX, 0u32, 0u32);
         let mut area = 0u64;
-        for (s, k) in segs.iter().zip(&keep) {
+        let row_has = |y: u32| {
+            rgba[y as usize * w * 4..(y as usize + 1) * w * 4].chunks_exact(4).any(|p| p[3] > EDGE_ALPHA)
+        };
+        for (i, (s, k)) in segs.iter().zip(&keep).enumerate() {
             if !*k {
                 continue;
             }
             area += s.area;
-            min_y = min_y.min(s.y0);
-            max_y = max_y.max(s.y1);
-            // 구간 안에서 알파가 0이 아닌 픽셀 기준으로 가로 범위를 다시 구한다 (옅은 가장자리 포함)
-            for y in s.y0..=s.y1 {
+            // 옅은 번짐(글로우)까지 포함하도록 위아래로 조금 넓힌다 (다른 덩어리 구간은 침범하지 않음).
+            let lo_limit = if i > 0 { segs[i - 1].y1 + 1 } else { 0 };
+            let hi_limit = if i + 1 < segs.len() { segs[i + 1].y0 - 1 } else { h as u32 - 1 };
+            let mut y0 = s.y0;
+            while y0 > lo_limit && s.y0 - y0 < HALO_ROWS && row_has(y0 - 1) {
+                y0 -= 1;
+            }
+            let mut y1 = s.y1;
+            while y1 < hi_limit && y1 - s.y1 < HALO_ROWS && row_has(y1 + 1) {
+                y1 += 1;
+            }
+            min_y = min_y.min(y0);
+            max_y = max_y.max(y1);
+            for y in y0..=y1 {
                 let row = &rgba[y as usize * w * 4..(y as usize + 1) * w * 4];
                 for x in 0..w {
-                    if row[x * 4 + 3] != 0 {
+                    if row[x * 4 + 3] > EDGE_ALPHA {
                         min_x = min_x.min(x as u32);
                         max_x = max_x.max(x as u32);
                     }
