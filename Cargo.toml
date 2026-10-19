@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/spine-sys-38",
+    "crates/spine-viewer-core",
+    "crates/sv-38",
+]
+resolver = "2"

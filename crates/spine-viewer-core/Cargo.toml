@@ -1,0 +1,11 @@
+[package]
+name = "spine-viewer-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+spine-sys-38 = { path = "../spine-sys-38" }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow"] }
+egui = "0.37"
+image = { version = "0.25", default-features = false, features = ["png"] }
+rfd = "0.17.2"

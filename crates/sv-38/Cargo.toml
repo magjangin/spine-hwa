@@ -1,0 +1,12 @@
+[package]
+name = "sv-38"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sv-3-8"
+path = "src/main.rs"
+
+[dependencies]
+spine-sys-38 = { path = "../spine-sys-38" }
+spine-viewer-core = { path = "../spine-viewer-core" }
