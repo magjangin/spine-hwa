@@ -4,7 +4,7 @@
       "command": "python",
       "args": ["mcp/spine_mcp.py"],
       "env": {
-        "SV_CLI": "H:\source\repos\spine hwa\bin\sv-cli.exe"
+        "SV_CLI": "H:/source/repos/spine hwa/bin/sv-cli.exe"
       }
     }
   }
