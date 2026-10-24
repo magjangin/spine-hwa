@@ -2,6 +2,7 @@
 
 > **Rust + Spine 3.8.99 공식 C++ 런타임 기반의 고속 스파인 뷰어, 배치 렌더러 CLI 및 AI MCP 서버**
 
+[![Release](https://img.shields.io/github/v/release/magjangin/spine-hwa?color=purple)](https://github.com/magjangin/spine-hwa/releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows_x64-blue.svg)](https://github.com/magjangin/spine-hwa)
 [![Spine Version](https://img.shields.io/badge/Spine-3.8.x_%2F_3.8.99-orange.svg)](http://esotericsoftware.com/)
 [![Rust](https://img.shields.io/badge/Rust-2021_Edition-red.svg)](https://www.rust-lang.org/)
